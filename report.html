@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.40">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="dcterms.date" content="2026-03-01">
+
+<title>YTL AI LABS Tech Assessment</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="report_files/libs/clipboard/clipboard.min.js"></script>
+<script src="report_files/libs/quarto-html/quarto.js"></script>
+<script src="report_files/libs/quarto-html/popper.min.js"></script>
+<script src="report_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="report_files/libs/quarto-html/anchor.min.js"></script>
+<link href="report_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="report_files/libs/quarto-html/quarto-syntax-highlighting-549806ee2085284f45b00abea8c6df48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="report_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="report_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="report_files/libs/bootstrap/bootstrap-8a79a254b8e706d3c925cde0a310d4f0.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">YTL AI LABS Tech Assessment</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">March 1, 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="ytl-ai-labs-tech-assessment" class="level1">
+<h1>YTL AI LABS Tech Assessment</h1>
+<p><strong>Candidate:</strong> Marcus Ong Ge Ye <strong>Date:</strong> 9th March 2026</p>
+<hr>
+</section>
+<section id="q1" class="level1">
+<h1>Q1:</h1>
+<hr>
+</section>
+<section id="q2-searchable-knowledge-base-chatbot-for-customer-support" class="level1">
+<h1>Q2: Searchable Knowledge Base Chatbot for Customer Support</h1>
+<section id="document-ingestion" class="level2">
+<h2 class="anchored" data-anchor-id="document-ingestion">1. Document Ingestion</h2>
+<p><strong>Parsing:</strong> Rather than a strict two-stage pipeline, a unified hybrid parser like MinerU, LightOnOCR-2 or Azure Document Intelligence handles layout detection and content extraction in a single pass, outputting Markdown that preserves structural hierarchy. Where a VLM is still needed for complex visuals, it must receive the surrounding page context alongside the image to fully capture the image context. For low-confidence or corrupted outputs, the system should automatically reroute to a general-purpose OCR fallback before flagging for human review.</p>
+<p><strong>Chunking:</strong> Hierarchical chunking is the most natural fit for customer support, a summary chunk retrieves quickly, and the detail related is fetched on demand, which mirrors how support knowledge bases are actually structured. Chunk boundaries should be validated empirically against a held-out question set rather than assuming a token size is correct. Semantic Chunking can be used if needed depending on business context.</p>
+<p><strong>Metadata Enrichment:</strong> Every chunk should be tagged with department, product line, document version, and security tier. The payoff is pre-retrieval filtering. This helps restricting the search space before the vector search even runs, improving both precision and latency. The schema must be defined before ingestion begins, as adding fields later requires full re-ingestion.</p>
+<p><strong>Embedding:</strong> A domain-adapted model fine-tuned on support ticket history will consistently outperform a general-purpose model on specialised terminology. Ingestion architecture should match corpus dynamics, an async queue for weekly updates, GPU-accelerated batch inference for near real-time corpora. Embedding model upgrades require full corpus re-embedding and should be treated as planned migrations.</p>
+</section>
+<section id="storage-and-retrieval" class="level2">
+<h2 class="anchored" data-anchor-id="storage-and-retrieval">2. Storage and Retrieval</h2>
+<p><strong>Vector Database:</strong> Amongst Qdrant, Milvus, pgvector, and Pinecone, Weaviate is the strongest fit for an enterprise customer support deployment. It offers native hybrid search, strong multi-tenancy support, and metadata filtering built in as priority features rather than bolted on, which are all non-negotiable requirements for highly accurate customer support.</p>
+<p><strong>Hybrid Search:</strong> Hybrid search combining regular retrieval, BM25 keyword search, and metadata pre-filtering would be the best approach as retrieval alone misses exact terms like product codes and BM25 keyword alone has no semantic understanding. Results are fused using Reciprocal Rank Fusion (RRF), which provides the best top-k chunks amongst the different retrieval systems.</p>
+<p><strong>Multi-Tenant Isolation:</strong> For any documents with PII or regulated data, separate indices per tenant with RBAC enforced at the API gateway would be the approach.</p>
+</section>
+<section id="answer-generation" class="level2">
+<h2 class="anchored" data-anchor-id="answer-generation">3. Answer Generation</h2>
+<p><strong>Retrieval-Augmented Generation</strong> Retrieved chunks are passed to the LLM as context alongside the query. The system prompt explicitly instructs the model to answer only from the provided context and to state when the answer is absent, this is helps to eliminate hallucinations in a setting where a wrong answer carries real legal consequences.</p>
+<p><strong>Reranking:</strong> Before prompt construction, a cross-encoder reranker like Cohere Rerank or Zerank 2 or compresses the initial K=20–50 retrieved candidates down to three to five high-precision chunks. This directly improves answer quality while reducing cost and context noise.</p>
+<p><strong>Agentic Reasoning:</strong> A ReAct agent is reserved for multi-hop queries requiring evidence across multiple documents. The majority of support queries should be routed through single-shot RAG as agentic loops add latency and cost that most queries do not justify.</p>
+<p><strong>Validation:</strong> Every response is evaluated using RAGAS, tracking faithfulness, context relevance, and answer correctness. A drop in context relevance points to a retriever problem. A drop in faithfulness points to a generator problem. Separating these two signals is what allows targeted fixes rather than retuning the entire pipeline blindly.</p>
+<hr>
+</section>
+</section>
+<section id="q3-english-malay-document-summariser" class="level1">
+<h1>Q3: English &amp; Malay Document Summariser</h1>
+<section id="preprocessing" class="level2">
+<h2 class="anchored" data-anchor-id="preprocessing">1. Preprocessing</h2>
+<p>Working with long documents in two languages is a relatively new and unexplored space for me. However, through my research experience and work with AI, this would be my approach. Given the uncertainty of whether the long documents would be in English, Malay, or both, and whether the summaries would be required in one or both languages, I will assume both languages on both ends.</p>
+<p>The first step in the pipeline is text extraction, where raw content is pulled from source documents. For plain text documents, standard PDF parsing libraries are sufficient. The extracted text is then cleaned by stripping headers, footers, and other boilerplate elements that may cloud relevant content during the summarization process.</p>
+<p>For documents containing images, figures, and captions. The PDF parser extracts the raw visual elements which are then passed to a multimodal LLM such as ILMUchat or GPT-4o for semantic interpretation,as standard OCR tools lack the understanding needed to interpret visual content meaningfully, particularly in a Malaysian context. While the technical details of their vision encoders are not publicly disclosed, both have demonstrated stronger performance in Malaysian cultural contexts and can be empirically tested for this purpose. Fine-tuning these models on domain-specific documents, such as legal, medical, or government corpora, could further improve extraction accuracy depending on the nature and complexity</p>
+<p>The text then undergoes normalization. Malay informal text presents unique challenges including abbreviations (e.g., jap, tak, dah), dialectal variations, and Romanized Arabic expressions, all of which must be standardized before any meaningful summarization can occur. Additionally, the presence of non-romanized scripts such as Jawi or Chinese characters introduces further complexity — these can either be transliterated to their romanized equivalents (Jawi to Rumi in the case of Malay) or translated to English where necessary. Research from the Jawi AI Project (NUS) has shown that fine-tuned vision-language models such as Qwen2.5-VL can achieve as low as 7% character error rate in Jawi OCR tasks, outperforming commercial models that frequently hallucinate incorrect transcriptions. Given ILMU’s state-of-the-art performance on MalayMMLU (87.20%), it stands as a strong candidate for such fine-tuning, combining deep Malay linguistic understanding with script-level recognition. Throughout normalization, lists or custom NER methods can be used to preserve Malaysian named entities, including government acronyms such as KWSP and JPJ, place names, and culturally specific terms, which generic text normalizers may incorrectly strip or expand.</p>
+<p>For long documents that exceed model context limits, a chunking strategy is applied. A sliding window or semantic chunking approach splits the document into overlapping segments, preserving contextual continuity across chunk boundaries. For semantic chunking of Malay text, standard embedding models trained on English corpora are insufficient. Malaya, a local NLP library, provides dedicated Malaysian embedding models by Mesolitica to chunk text semantically.</p>
+<p>For long documents that exceed ILMU’s assumed 8K context window, the document is split into chunks at natural sentence or paragraph boundaries using Malaya NLP embedding models such as, mistral-embedding-349m-8k-contrastive for Malay text, ensuring chunks do not break mid-sentence. Semantic chunking is not strictly necessary here, as iterative refinement preserves cross-chunk context through the running summary, chunks only need to respect token limits rather than be semantically self-contained.</p>
+</section>
+<section id="multilingual-support-code-switching" class="level2">
+<h2 class="anchored" data-anchor-id="multilingual-support-code-switching">2. Multilingual Support &amp; Code-Switching</h2>
+<p>Multilingual support is handled primarily through ILMU’s native multilingual capability. Rather than routing text through a separate translation pipeline (Cost saved on language detection and language translation), we utilise models such as ILMU to generate summaries directly in the target language whether English, Malay, or both, eliminating an additional point of failure that translation introduces.</p>
+<p>For code-switched segments, ILMU holds a distinct advantage over general-purpose models. As demonstrated in the technical report, ILMU accurately transcribes and responds to mixed Malay-English sentences without distorting either language, whereas models like DeepSeek have been shown to contaminate Malay output with Indonesian vocabulary. The language metadata tag carried from preprocessing directly controls how ILMU is prompted — Malay segments are prompted in Malay, English segments in English, and mixed segments are handled with explicit code-switching instructions.</p>
+<p>Beyond standard Malay, ILMU’s sensitivity to the full spectrum of Malay linguistic registers is particularly valuable for long document summarization. ILMU demonstrates the ability to handle colloquial Malay (Bahasa Pasar), formal royal Malay (Bahasa Istana), literary styles such as hikayat, and Manglish — the distinctive local blend of English and Malay expressions. This means that regardless of the register or style of the source document, ILMU can produce summaries that are not only linguistically accurate but also contextually and culturally appropriate for Malaysian readers.</p>
+<p>Where bilingual output is required, ILMU can generate parallel summaries in both languages within a single pipeline, leveraging its multilingual foundation without the need for separate models.</p>
+<p>As the full technical specifications of ILMU are not publicly disclosed, we draw from the paper “Banking Done Right” (2025), which reveals that the ILMU variant deployed in Ryt AI is a decoder-based model under 10 billion parameters with an 8K token context window and Rotary Positional Embeddings (RoPE). For summarization, context window size is a critical factor — the larger the window, the more information the model can retain before condensing it. The 8K context window can potentially be extended using YaRN or similar methods with minimal fine-tuning, given its resilience with RoPE. Otherwise, the chunking strategy established in preprocessing serves as a practical fallback.</p>
+</section>
+<section id="summarization-approach" class="level2">
+<h2 class="anchored" data-anchor-id="summarization-approach">3. Summarization Approach</h2>
+<p>For this task, abstractive summarization is the preferred approach. Given the prevalence of code-switching, register variation, and mixed scripts in Malaysian documents, extractive methods would produce incoherent output by lifting sentences directly without resolving linguistic context. Abstractive summarization naturally handles this diversity by generating fluent, coherent text that captures meaning regardless of how varied the source language is, and is able to summarize into either Malay or English. An abstractive approach is also increasingly feasible given the rapid improvement of LLMs in Malay language understanding. Models such as ILMU, which achieves state-of-the-art performance on MalayMMLU (87.20%), and GPT-4o (84.97%), demonstrate sufficient Malay linguistic competency to generate coherent abstractive summaries — something that would not have been reliable with earlier generation models.</p>
+<p>ILMU with a low temperature serves as the primary model for summarization for several reasons. First, it achieves state-of-the-art performance on MalayMMLU (87.20%), the highest among 54 models tested across 20 LLM developers including GPT-5, LLaMA-4-Scout, and DeepSeek-V3, while remaining competitive on MMLU (80.39%) and leading on CMMLU (83.64%), demonstrating strong multilingual capability across all three languages relevant to Malaysian documents. Second, ILMU’s ability to perform tasks directly relevant to summarization, including summarizing complex Malaysian government policy documents such as RMK-13, causal and logical reasoning, and text generation across formal and stylized registers, meaning output style can be controlled depending on the nature of the source document, whether if they are formal government reports, literary texts, or informal communications.</p>
+<p>However, given ILMU’s assumed 8K context window constraint, models with stronger context handling and competitive MalayMMLU scores — such as GPT-4o (84.97%) or DeepSeek-V3 (80.56%) — can serve as fallbacks for documents that exceed ILMU’s context limits even after chunking. Model selection can therefore be treated as an empirical decision, benchmarking candidates against a held-out set of Malaysian documents across both languages before deployment.</p>
+<p>For documents within ILMU’s assumed 8K context window, a stuffing approach is preferred, passing the entire document in a single call with no information loss. For longer documents, iterative refinement is the recommended strategy, summarizing the first chunk, then progressively feeding each subsequent chunk alongside the running summary, preserving cross-chunk context and narrative flow. Map-reduce is generally avoided for summarization tasks as its isolated chunk processing risks losing cross-chunk dependencies and narrative coherencea Map-reduce would only be reconsidered if strict structural chunking splitting at section or heading boundaries — is applied, ensuring each chunk is sufficiently self-contained.</p>
+</section>
+<section id="evaluating-summary-quality" class="level2">
+<h2 class="anchored" data-anchor-id="evaluating-summary-quality">4. Evaluating Summary Quality</h2>
+<p>Evaluating the quality of multilingual summaries requires both automatic and human-based approaches, as standard NLP metrics alone are insufficient to capture the linguistic and cultural nuance of Malaysian documents.</p>
+<p>Given the abstractive nature of the summaries and the absence of pre-existing reference summaries for Malaysian documents, reference-based metrics such as ROUGE-L and BERTScore are fundamentally unsuitable. These metrics require human-written ground truth summaries to compare against, which do not exist for the unique documents this application targets, and would require prohibitively expensive human annotation to produce at scale.</p>
+<p>Human evaluation remains the gold standard, particularly for Malay summaries where cultural nuance and register appropriateness are difficult to capture automatically. However, given its cost and lack of scalability, human evaluation is best reserved for high-stakes summarization tasks or to bootstrap a gold-standard evaluation dataset of annotated English and Malay summary pairs, which can then be used to calibrate the automatic metrics.</p>
+<p>A more suitable approach for this pipeline is a QuestEval-inspired framework built on ILMU, where ILMU generates questions from the source document and independently verifies whether those questions can be answered using the generated summary in both languages. Unlike standard QuestEval, which relies on English-trained QA models, an ILMU-based evaluator natively handles Malay, code-switched, and Malaysian-specific content, producing more culturally grounded faithfulness scores. While this partially reintroduces self-evaluation bias, the separation of question generation and answer verification as distinct tasks mitigates systematic error, making it a practical and reference-free faithfulness metric for document summarization.</p>
+<p>Rather than gating output on QuestEval scores, which would compound the latency of iterative refinement. QuestEval runs asynchronously after the summary is returned to the user. The resulting faithfulness score is surfaced as a confidence indicator in the UI, allowing users to make informed decisions about whether to accept or regenerate the summary.</p>
+</section>
+</section>
+<section id="final-application" class="level1">
+<h1>5. Final Application</h1>
+<p><img src="Q3Diagram.png" class="img-fluid"></p>
+<p>The application serves as a document summarization tool supporting both English and Malay, designed for a broad Malaysian user base across sectors such as government, education, and business. From a user experience perspective, adoption is very dependent on trust and simplicity users should be able to upload a document and receive a summary with minimal friction, with clear language selection options for input and output. To build trust, the application should use confidence indicators, highlight key extracted points alongside the new generated summary, and allow users to adjust summary length or regenerate with different settings and style. Chat history enables users to revisit previous summaries and continue refining them conversationally, reducing the need to reprocess documents. For multilingual users, the interface itself should support both English and Malay. Underlying these features is the technical pipeline described below, which handles the complexity of multilingual document processing transparently so that the experience remains simple for the end user.</p>
+<p>In production, the application is built as a FastAPI backend handling document uploads. Before queuing, FastAPI checks Redis for a cached summary using a composite key of the extracted text hash, output language, and summary settings,returning immediately if a match is found. If no cache hit exists, the document is enqueued to Kafka for async processing. Async workers run the full pipeline preprocessing, document summarization, and evaluation with documents and intermediate chunk checkpoints stored in S3 to handle worker failures gracefully. Evaluation runs in parallel as an async worker, updating the confidence score in PostgreSQL once complete, which is then pushed to the client. Completed summaries, QuestEval scores, chat history, and user feedback are persisted in PostgreSQL, with the document hash stored in Redis for fast cache lookups. The frontend displays the summary with its async QuestEval confidence score, and collects user feedback via thumbs up/down and inline edits. ILMUchat serves as the primary LLM API, and all API calls are monitored via Prometheus and visualised in Grafana tracking queue depth, ILMU API latency, and per-language QuestEval scores over time to guide future fine-tuning decisions.</p>
+<p><img src="Q3Architecture.png" class="img-fluid"></p>
+<hr>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
