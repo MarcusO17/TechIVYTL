@@ -1,0 +1,192 @@
+---
+title: "LLM Tool Call Validator"
+format: html
+---
+
+## Overview
+
+Validates and coerces untrusted JSON payloads from an LLM to a strict schema.
+
+**Target schema:**
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `action` | `"search"` \| `"answer"` | required |
+| `q` | non-empty string | required iff `action == "search"` |
+| `k` | int in `[1, 5]` | optional, default `3` |
+
+Returns `(clean, errors)` — either a normalized dict or `({}, errors)` on fatal failure.
+
+---
+
+## Implementation
+
+```{python}
+from typing import Any, Dict, List, Tuple
+
+def validate_tool_call(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Returns (clean, errors). 'clean' strictly follows the schema with defaults applied.
+    - Trim strings; coerce numeric strings to ints.
+    - Remove unknown keys.
+    - If action=='answer', ignore 'q' if present (no error).
+    - On fatal errors (e.g., missing/invalid 'action', or missing/empty 'q' for search), return ({}, errors).
+    """
+    errors = []
+    clean = {}
+
+    ## Action Validation
+    raw_action = payload.get("action")          # avoid KeyError on direct access
+    if raw_action is None:
+        return {}, ["Missing required field: 'action'"]
+    if not isinstance(raw_action, str):
+        return {}, [f"'action' must be a string, got {type(raw_action).__name__}"]
+    action = raw_action.strip().lower()         # normalize before membership check
+    if action not in ("search", "answer"):
+        return {}, [f"'action' must be 'search' or 'answer', got {raw_action!r}"]
+
+    clean["action"] = action
+
+    ## K Validation
+    raw_k = payload.get("k")                   # None if absent — k is fully optional
+    if raw_k is None:
+        pass                                    # omit k from clean entirely
+    else:
+        if isinstance(raw_k, bool):            # bool subclasses int — must check first
+            errors.append(f"'k' must be an integer, got bool ({raw_k!r}); using default 3")
+            coerced_k = 3
+        elif isinstance(raw_k, int):
+            coerced_k = raw_k
+        elif isinstance(raw_k, str):
+            stripped = raw_k.strip()
+            try:
+                coerced_k = int(stripped)
+            except ValueError:                 # e.g. "few", "3 results"
+                errors.append(f"'k' could not be coerced to int ({raw_k!r}); using default 3")
+                coerced_k = 3
+        elif isinstance(raw_k, float):
+            if raw_k.is_integer():             # e.g. 3.0 → 3
+                coerced_k = int(raw_k)
+            else:                              # e.g. 3.9 → reject
+                errors.append(f"'k' is a non-integer float ({raw_k!r}); using default 3")
+                coerced_k = 3
+        else:                                  # list, dict, etc.
+            errors.append(f"'k' has unexpected type {type(raw_k).__name__!r}; using default 3")
+            coerced_k = 3
+
+        if not (1 <= coerced_k <= 5):          # pull to nearest boundary
+            errors.append(f"'k' must be in [1, 5], got {coerced_k}; clamping to range")
+            coerced_k = max(1, min(5, coerced_k))
+
+        clean["k"] = coerced_k
+
+    ## Q Validation
+    if action == "search":
+        raw_q = payload.get("q")
+        if raw_q is None:
+            return {}, ["'q' is required when action is 'search'"]
+        if not isinstance(raw_q, str):
+            return {}, [f"'q' must be a string, got {type(raw_q).__name__}"]
+        q = raw_q.strip()
+        if not q:                              # catches "   " after strip
+            return {}, ["'q' must be a non-empty string"]
+
+        clean["q"] = q                         # silently ignored if action == "answer"
+
+    return (clean, errors)
+```
+
+---
+
+## Design Notes
+
+**Fatal vs non-fatal errors**
+
+Fatal errors return `({}, errors)` immediately — the caller should not proceed.
+Non-fatal errors accumulate in `errors` with a fallback applied.
+
+| Condition | Fatal? |
+|-----------|--------|
+| `action` missing, wrong type, or unknown value | yes |
+| `q` missing, wrong type, or empty (search only) | yes |
+| `k` wrong type, uncoerceable, or out of range | no — fallback to default `3` or clamp |
+
+**The `bool` trap**
+
+In Python, `bool` is a subclass of `int`, so `isinstance(True, int)` returns `True`.
+`True` would silently pass as `k=1` and `False` as `k=0` without an explicit check.
+The `bool` branch must come before the `int` branch.
+
+**Unknown keys**
+
+`clean` is always built from scratch — unknown keys are dropped implicitly since they are never written into it.
+
+---
+
+## Test Cases
+
+```{python}
+cases = [
+    # ── happy path ──────────────────────────────────────────────────────────
+    ("happy path search",               {"action": "search", "q": "hello", "k": 2}),
+    ("happy path answer",               {"action": "answer", "k": 3}),
+    ("answer ignores q",                {"action": "answer", "q": "ignored"}),
+    ("k absent — omitted from clean",   {"action": "answer"}),
+
+    # ── action weirdness ────────────────────────────────────────────────────
+    ("uppercase action",                {"action": "SEARCH", "q": "hi"}),
+    ("padded whitespace action",        {"action": "  answer  "}),
+    ("newline-padded action",           {"action": "search\n", "q": "hi"}),
+    ("punctuation in action",           {"action": "Search!"}),
+    ("empty action string",             {"action": ""}),
+    ("explicit None action",            {"action": None}),
+    ("list as action",                  {"action": ["search"]}),
+    ("dict as action",                  {"action": {"type": "search"}}),
+    ("bool as action",                  {"action": True}),
+
+    # ── k weirdness ─────────────────────────────────────────────────────────
+    ("k as numeric string",             {"action": "search", "q": "hi", "k": "3"}),
+    ("k as padded numeric string",      {"action": "search", "q": "hi", "k": "  2 "}),
+    ("k as whole float",                {"action": "search", "q": "hi", "k": 3.0}),
+    ("k as explicit None — omitted",    {"action": "search", "q": "hi", "k": None}),
+    ("k below range — clamp to 1",      {"action": "search", "q": "hi", "k": 0}),
+    ("k above range — clamp to 5",      {"action": "search", "q": "hi", "k": 6}),
+    ("k as False — bool trap",          {"action": "search", "q": "hi", "k": False}),
+    ("k as True — bool trap",           {"action": "search", "q": "hi", "k": True}),
+    ("k as fractional float",           {"action": "search", "q": "hi", "k": 3.9}),
+    ("k as garbage string",             {"action": "search", "q": "hi", "k": "abc"}),
+    ("k as empty list",                 {"action": "search", "q": "hi", "k": []}),
+
+    # ── q weirdness ─────────────────────────────────────────────────────────
+    ("q padded — stripped",             {"action": "search", "q": "  hello  "}),
+    ("q only whitespace",               {"action": "search", "q": "   "}),
+    ("q empty string",                  {"action": "search", "q": ""}),
+    ("q explicit None",                 {"action": "search", "q": None}),
+    ("q as int",                        {"action": "search", "q": 42}),
+    ("answer + None q",                 {"action": "answer", "q": None}),
+
+    # ── unknown keys ────────────────────────────────────────────────────────
+    ("unknown key confidence",          {"action": "answer", "confidence": 0.95}),
+    ("unknown key reasoning",           {"action": "search", "q": "hi", "reasoning": "because"}),
+
+    # ── missing fields ───────────────────────────────────────────────────────
+    ("empty payload",                   {}),
+    ("missing action",                  {"q": "hello", "k": 2}),
+    ("missing q for search",            {"action": "search"}),
+
+    # ── llm being helpful ────────────────────────────────────────────────────
+    ("query instead of q",              {"action": "search", "query": "hello"}),
+    ("natural language k",              {"action": "search", "q": "hello", "k": "few"}),
+    ("k with units",                    {"action": "search", "q": "hello", "k": "3 results"}),
+    ("type instead of action",          {"type": "search", "q": "hello"}),
+]
+
+for desc, payload in cases:
+    clean, errors = validate_tool_call(payload)
+    status = "✓" if clean and not errors else "⚠" if clean and errors else "✗"
+    print(f"{status} [{desc}]")
+    print(f"   out : {clean}")
+    if errors:
+        print(f"   err : {errors}")
+    print()
+```

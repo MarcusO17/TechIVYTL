@@ -6,7 +6,6 @@
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
-<meta name="dcterms.date" content="2026-03-01">
 
 <title>YTL AI LABS Tech Assessment</title>
 <style>
@@ -33,15 +32,38 @@ ul.task-list li input[type="checkbox"] {
 <link href="report_files/libs/quarto-html/quarto-syntax-highlighting-549806ee2085284f45b00abea8c6df48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="report_files/libs/bootstrap/bootstrap.min.js"></script>
 <link href="report_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="report_files/libs/bootstrap/bootstrap-8a79a254b8e706d3c925cde0a310d4f0.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="report_files/libs/bootstrap/bootstrap-a1ff8711b79ae3724c050874b28d9907.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 
 
 </head>
 
-<body class="fullcontent">
+<body>
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul class="collapse">
+  <li><a href="#ytl-ai-labs-tech-assessment" id="toc-ytl-ai-labs-tech-assessment" class="nav-link active" data-scroll-target="#ytl-ai-labs-tech-assessment">YTL AI LABS Tech Assessment</a></li>
+  <li><a href="#q1" id="toc-q1" class="nav-link" data-scroll-target="#q1">Q1:</a></li>
+  <li><a href="#q2-searchable-knowledge-base-chatbot-for-customer-support" id="toc-q2-searchable-knowledge-base-chatbot-for-customer-support" class="nav-link" data-scroll-target="#q2-searchable-knowledge-base-chatbot-for-customer-support">Q2: Searchable Knowledge Base Chatbot for Customer Support</a>
+  <ul class="collapse">
+  <li><a href="#document-ingestion" id="toc-document-ingestion" class="nav-link" data-scroll-target="#document-ingestion">1. Document Ingestion</a></li>
+  <li><a href="#storage-and-retrieval" id="toc-storage-and-retrieval" class="nav-link" data-scroll-target="#storage-and-retrieval">2. Storage and Retrieval</a></li>
+  <li><a href="#answer-generation" id="toc-answer-generation" class="nav-link" data-scroll-target="#answer-generation">3. Answer Generation</a></li>
+  </ul></li>
+  <li><a href="#q3-english-malay-document-summariser" id="toc-q3-english-malay-document-summariser" class="nav-link" data-scroll-target="#q3-english-malay-document-summariser">Q3: English &amp; Malay Document Summariser</a>
+  <ul class="collapse">
+  <li><a href="#preprocessing" id="toc-preprocessing" class="nav-link" data-scroll-target="#preprocessing">1. Preprocessing</a></li>
+  <li><a href="#multilingual-support-code-switching" id="toc-multilingual-support-code-switching" class="nav-link" data-scroll-target="#multilingual-support-code-switching">2. Multilingual Support &amp; Code-Switching</a></li>
+  <li><a href="#summarization-approach" id="toc-summarization-approach" class="nav-link" data-scroll-target="#summarization-approach">3. Summarization Approach</a></li>
+  <li><a href="#evaluating-summary-quality" id="toc-evaluating-summary-quality" class="nav-link" data-scroll-target="#evaluating-summary-quality">4. Evaluating Summary Quality</a></li>
+  </ul></li>
+  <li><a href="#final-application" id="toc-final-application" class="nav-link" data-scroll-target="#final-application">5. Final Application</a></li>
+  </ul>
+<div class="quarto-alternate-formats"><h2>Other Formats</h2><ul><li><a href="report.pdf"><i class="bi bi-file-pdf"></i>PDF</a></li></ul></div></nav>
+</div>
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
@@ -57,7 +79,7 @@ ul.task-list li input[type="checkbox"] {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">March 1, 2026</p>
+      <p class="date">Invalid Date</p>
     </div>
   </div>
   
@@ -76,6 +98,77 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="q1" class="level1">
 <h1>Q1:</h1>
+<pre><code>from typing import Any, Dict, List, Tuple
+def validate_tool_call(payload: Dict[str, Any]) -&gt; Tuple[Dict[str, Any], List[str]]:
+    """
+    Returns (clean, errors). 'clean' strictly follows the schema with defaults applied.
+    - Trim strings; coerce numeric strings to ints.
+    - Remove unknown keys.
+    - If action=='answer', ignore 'q' if present (no error).
+    - On fatal errors (e.g., missing/invalid 'action', or missing/empty 'q' for search), return ({}, errors).
+    """
+    errors = []
+    clean = {}
+
+    ## Action Validation
+    raw_action = payload.get("action")          # avoid KeyError on direct access
+    if raw_action is None:
+        return {}, ["Missing required field: 'action'"]
+    if not isinstance(raw_action, str):
+        return {}, [f"'action' must be a string, got {type(raw_action).__name__}"]
+    action = raw_action.strip().lower()         # normalize before membership check
+    if action not in ("search", "answer"):
+        return {}, [f"'action' must be 'search' or 'answer', got {raw_action!r}"]
+
+    clean["action"] = action
+
+    ## K Validation
+    raw_k = payload.get("k")                   # None if absent, k is fully optional
+    if raw_k is None:
+        pass                                    # omit k from clean entirely
+    else:
+        if isinstance(raw_k, bool):            # bool subclasses int IMPORTANT
+            errors.append(f"'k' must be an integer, got bool ({raw_k!r}); using default 3")
+            coerced_k = 3
+        elif isinstance(raw_k, int):
+            coerced_k = raw_k
+        elif isinstance(raw_k, str):
+            stripped = raw_k.strip()
+            try:
+                coerced_k = int(stripped)
+            except ValueError:                 # e.g. "few", "3 results"
+                errors.append(f"'k' could not be coerced to int ({raw_k!r}); using default 3")
+                coerced_k = 3
+        elif isinstance(raw_k, float):
+            if raw_k.is_integer():             # e.g. 3.0 = 3
+                coerced_k = int(raw_k)
+            else:                              # e.g. 3.9 = reject
+                errors.append(f"'k' is a non-integer float ({raw_k!r}); using default 3")
+                coerced_k = 3
+        else:                                  # list, dict, etc.
+            errors.append(f"'k' has unexpected type {type(raw_k).__name__!r}; using default 3")
+            coerced_k = 3
+
+        if not (1 &lt;= coerced_k &lt;= 5):          # pull to nearest boundary
+            errors.append(f"'k' must be in [1, 5], got {coerced_k}; clamping to range")
+            coerced_k = max(1, min(5, coerced_k))
+
+        clean["k"] = coerced_k
+
+    ## Q Validation
+    if action == "search":
+        raw_q = payload.get("q")
+        if raw_q is None:
+            return {}, ["'q' is required when action is 'search'"]
+        if not isinstance(raw_q, str):
+            return {}, [f"'q' must be a string, got {type(raw_q).__name__}"]
+        q = raw_q.strip()
+        if not q:                              # catches "   " after strip
+            return {}, ["'q' must be a non-empty string"]
+
+        clean["q"] = q                         # q will be ignored if action == "answer" silently
+
+    return (clean, errors)</code></pre>
 <hr>
 </section>
 <section id="q2-searchable-knowledge-base-chatbot-for-customer-support" class="level1">

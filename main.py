@@ -23,12 +23,12 @@ def validate_tool_call(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[st
     clean["action"] = action
 
     ## K Validation
-    raw_k = payload.get("k")                   # None if absent — k is fully optional
+    raw_k = payload.get("k")                   # None if absent, k is fully optional
     if raw_k is None:
         pass                                    # omit k from clean entirely
     else:
         if isinstance(raw_k, bool):            # bool subclasses int IMPORTANT
-            errors.append(f"'k' must be an integer, got bool ({raw_k}); using default 3")
+            errors.append(f"'k' must be an integer, got bool ({raw_k!r}); using default 3")
             coerced_k = 3
         elif isinstance(raw_k, int):
             coerced_k = raw_k
@@ -37,16 +37,16 @@ def validate_tool_call(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[st
             try:
                 coerced_k = int(stripped)
             except ValueError:                 # e.g. "few", "3 results"
-                errors.append(f"'k' could not be coerced to int ({raw_k}); using default 3")
+                errors.append(f"'k' could not be coerced to int ({raw_k!r}); using default 3")
                 coerced_k = 3
         elif isinstance(raw_k, float):
-            if raw_k.is_integer():             # e.g. 3.0 → 3
+            if raw_k.is_integer():             # e.g. 3.0 = 3
                 coerced_k = int(raw_k)
-            else:                              # e.g. 3.9 → reject
-                errors.append(f"'k' is a non-integer float ({raw_k}); using default 3")
+            else:                              # e.g. 3.9 = reject
+                errors.append(f"'k' is a non-integer float ({raw_k!r}); using default 3")
                 coerced_k = 3
         else:                                  # list, dict, etc.
-            errors.append(f"'k' has unexpected type {type(raw_k).__name__}; using default 3")
+            errors.append(f"'k' has unexpected type {type(raw_k).__name__!r}; using default 3")
             coerced_k = 3
 
         if not (1 <= coerced_k <= 5):          # pull to nearest boundary
@@ -66,7 +66,7 @@ def validate_tool_call(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[st
         if not q:                              # catches "   " after strip
             return {}, ["'q' must be a non-empty string"]
 
-        clean["q"] = q                         # q silently ignored if action == "answer"
+        clean["q"] = q                         # q will be ignored if action == "answer" silently
 
     return (clean, errors)
 

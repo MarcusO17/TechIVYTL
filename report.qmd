@@ -1,7 +1,17 @@
 ---
 title: "YTL AI LABS Tech Assessment"
 candidate: "Marcus Ong Ge Ye"
-date: "March 2026"
+date: "9th March 2026"
+format: 
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: show
+    theme: cosmo
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
 ---
 
 # YTL AI LABS Tech Assessment
@@ -13,7 +23,79 @@ date: "March 2026"
 ---
 
 # Q1:
+```
+from typing import Any, Dict, List, Tuple
+def validate_tool_call(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Returns (clean, errors). 'clean' strictly follows the schema with defaults applied.
+    - Trim strings; coerce numeric strings to ints.
+    - Remove unknown keys.
+    - If action=='answer', ignore 'q' if present (no error).
+    - On fatal errors (e.g., missing/invalid 'action', or missing/empty 'q' for search), return ({}, errors).
+    """
+    errors = []
+    clean = {}
 
+    ## Action Validation
+    raw_action = payload.get("action")          # avoid KeyError on direct access
+    if raw_action is None:
+        return {}, ["Missing required field: 'action'"]
+    if not isinstance(raw_action, str):
+        return {}, [f"'action' must be a string, got {type(raw_action).__name__}"]
+    action = raw_action.strip().lower()         # normalize before membership check
+    if action not in ("search", "answer"):
+        return {}, [f"'action' must be 'search' or 'answer', got {raw_action!r}"]
+
+    clean["action"] = action
+
+    ## K Validation
+    raw_k = payload.get("k")                   # None if absent, k is fully optional
+    if raw_k is None:
+        pass                                    # omit k from clean entirely
+    else:
+        if isinstance(raw_k, bool):            # bool subclasses int IMPORTANT
+            errors.append(f"'k' must be an integer, got bool ({raw_k!r}); using default 3")
+            coerced_k = 3
+        elif isinstance(raw_k, int):
+            coerced_k = raw_k
+        elif isinstance(raw_k, str):
+            stripped = raw_k.strip()
+            try:
+                coerced_k = int(stripped)
+            except ValueError:                 # e.g. "few", "3 results"
+                errors.append(f"'k' could not be coerced to int ({raw_k!r}); using default 3")
+                coerced_k = 3
+        elif isinstance(raw_k, float):
+            if raw_k.is_integer():             # e.g. 3.0 = 3
+                coerced_k = int(raw_k)
+            else:                              # e.g. 3.9 = reject
+                errors.append(f"'k' is a non-integer float ({raw_k!r}); using default 3")
+                coerced_k = 3
+        else:                                  # list, dict, etc.
+            errors.append(f"'k' has unexpected type {type(raw_k).__name__!r}; using default 3")
+            coerced_k = 3
+
+        if not (1 <= coerced_k <= 5):          # pull to nearest boundary
+            errors.append(f"'k' must be in [1, 5], got {coerced_k}; clamping to range")
+            coerced_k = max(1, min(5, coerced_k))
+
+        clean["k"] = coerced_k
+
+    ## Q Validation
+    if action == "search":
+        raw_q = payload.get("q")
+        if raw_q is None:
+            return {}, ["'q' is required when action is 'search'"]
+        if not isinstance(raw_q, str):
+            return {}, [f"'q' must be a string, got {type(raw_q).__name__}"]
+        q = raw_q.strip()
+        if not q:                              # catches "   " after strip
+            return {}, ["'q' must be a non-empty string"]
+
+        clean["q"] = q                         # q will be ignored if action == "answer" silently
+
+    return (clean, errors)
+```
 
 
 ---
